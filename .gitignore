@@ -1,0 +1,24 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Keil 自动生成
+Objects/
+Objects_B/
+Listings/
+Listings_B/
+DebugConfig/
+RTE/
+*.uvoptx
+*.uvguix.*
+*.log
+
+# 归档与临时
+.comments-backup.zip
+*.zip
+.dsh-office-*
+
+# IDE
+.idea/
+.vscode/
