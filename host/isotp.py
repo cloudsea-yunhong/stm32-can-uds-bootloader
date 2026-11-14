@@ -133,7 +133,7 @@ class IsoTp:
                 continue
             if fs == 2:
                 raise FlowControlOverflow("接收方缓冲不足（FC=OVFLW）")
-        raise TxTimeout("等待流控帧超时（N_Bs）")
+        raise TxTimeout("等待流控帧超时")
 
     @staticmethod
     def _stmin_to_ms(stmin: int) -> float:
@@ -187,7 +187,7 @@ class IsoTp:
                 deadline = time.monotonic() + self.n_cr
                 frame = self._recv_frame(deadline)
                 if frame is None:
-                    raise RxTimeout("等待连续帧超时（N_Cr）")
+                    raise RxTimeout("等待连续帧超时")
                 if (frame[0] & 0xF0) != 0x20:
                     raise FrameFormatError(f"期望连续帧，收到 PCI=0x{frame[0]:02X}")
                 if (frame[0] & 0x0F) != sn:

@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """与 STM32F407 硬件 CRC 单元一致的 CRC32 实现。
 
 F407 的 CRC 单元特性（RM0090）：
@@ -30,10 +30,18 @@ def _make_table() -> list[int]:
 _TABLE = _make_table()
 
 
+def _word_msb(data: bytes) -> bytes:
+    """STM32 硬件按 32 位字处理，字内字节从高到低，先反转每个字。"""
+    out = bytearray()
+    for i in range(0, len(data), 4):
+        out.extend(data[i:i + 4][::-1])
+    return bytes(out)
+
+
 def crc32_stm32(data: bytes, init: int = INIT) -> int:
     """逐字节的 MSB-first 实现，结果与硬件一致（长度需为 4 的倍数）。"""
     crc = init & 0xFFFFFFFF
-    for byte in data:
+    for byte in _word_msb(data):
         crc ^= (byte << 24) & 0xFFFFFFFF
         for _ in range(8):
             crc = ((crc << 1) ^ POLY) & 0xFFFFFFFF if crc & 0x80000000 \
@@ -44,7 +52,7 @@ def crc32_stm32(data: bytes, init: int = INIT) -> int:
 def crc32_stm32_fast(data: bytes, init: int = INIT) -> int:
     """查表实现，快约 8 倍，结果与 crc32_stm32 相同。"""
     crc = init & 0xFFFFFFFF
-    for byte in data:
+    for byte in _word_msb(data):
         index = ((crc >> 24) ^ byte) & 0xFF
         crc = ((crc << 8) & 0xFFFFFFFF) ^ _TABLE[index]
     return crc

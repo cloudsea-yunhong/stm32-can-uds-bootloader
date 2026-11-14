@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """命令行入口：probe / monitor / flash / read / raw。
 
 示例：
@@ -99,9 +99,9 @@ def cmd_rollback(args) -> int:
         time.sleep(0.8)
         uds.enter_programming()
         uds.switch_area(area)
-        print(f"已切换启动区到 App-{'A' if area == 0 else 'B'}，正在复位……")
+        print(f"已切换启动区到 {'A' if area == 0 else 'B'} 区，正在复位……")
         uds.ecu_reset(0x01)
-        print("复位指令已发送。注意：若目标区固件无效，节点会停在 Bootloader。")
+        print("复位指令已发送。注意：若目标区固件无效，节点会停在引导程序。")
     finally:
         if fake_ecu:
             fake_ecu.stop()
@@ -135,7 +135,7 @@ def cmd_flash(args) -> int:
               f"{result.elapsed_s:.2f} s")
         if args.area is not None:
             flasher.switch_and_reset(args.area)
-            print(f"已切到 App-{'A' if args.area == 0 else 'B'} 并复位")
+            print(f"已切到 {'A' if args.area == 0 else 'B'} 区并复位")
     except NrcError as exc:
         print("刷写失败（负响应）:", exc)
         rc = 2
@@ -154,7 +154,7 @@ def cmd_flash(args) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="CAN Bootloader / UDS 刷写工具")
+        description="CAN 双区引导程序 / UDS 刷写工具")
     parser.add_argument("--backend", default="gs_usb",
                         choices=["gs_usb", "pcan", "slcan", "virtual"],
                         help="python-can 后端")
@@ -204,13 +204,14 @@ def main(argv: list[str] | None = None) -> int:
                          help="0x36 块长度（含 SID+BSC），默认 642")
     p_flash.add_argument("--resume", action="store_true", help="断点续传")
     p_flash.add_argument("--area", type=int, choices=[0, 1], default=None,
-                         help="刷完后切区：0=App-A，1=App-B")
+                         help="刷完后切区：0=A 区，1=B 区")
     p_flash.add_argument("--uid", default=None, help="UID 折叠值（十六进制）")
     p_flash.add_argument("--fake", action="store_true",
                          help="启动内置假 ECU（虚拟总线）")
     p_flash.set_defaults(func=cmd_flash)
 
     args = parser.parse_args(argv)
+    args.fake = getattr(args, "fake", False)
     if args.fake and args.backend == "gs_usb":
         args.backend = "virtual"
     try:

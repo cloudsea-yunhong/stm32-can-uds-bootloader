@@ -53,7 +53,7 @@ class Flasher:
         crc = crc32_stm32_fast(firmware[:total])
         if self.verbose:
             print(f"固件：{bin_path}")
-            print(f"大小：{len(firmware)} 字节（补齐后），CRC32=0x{crc:08X}")
+            print(f"大小：{len(firmware)} 字节（补齐后），校验值=0x{crc:08X}")
 
         self.uds.enter_programming(uid_fold=uid_fold)
         # App 收到 10 02 后会写 BKP 并复位，Bootloader 的会话/解锁状态是清零的。
@@ -61,7 +61,7 @@ class Flasher:
         time.sleep(0.8)
         self.uds.enter_programming(uid_fold=uid_fold)
         if self.verbose:
-            print("已进入编程会话（Bootloader）")
+            print("已进入编程会话（引导程序）")
 
         # 擦除：可能触发 0x78，UdsClient 已处理
         self.uds.erase_region(addr, total)
@@ -113,7 +113,7 @@ class Flasher:
     def switch_and_reset(self, area: int) -> None:
         self.uds.switch_area(area)
         if self.verbose:
-            print(f"已切到 App-{'A' if area == 0 else 'B'}，准备复位")
+            print(f"已切到 {'A' if area == 0 else 'B'} 区，准备复位")
         self.uds.ecu_reset(0x01)
 
     @staticmethod

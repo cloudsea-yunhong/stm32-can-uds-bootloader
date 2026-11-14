@@ -14,6 +14,10 @@ import time
 from typing import Optional
 
 import can
+import logging
+
+# 屏蔽 python-can 在 Windows 上的英文告警
+logging.getLogger("can").setLevel(logging.ERROR)
 
 
 DEFAULT_BITRATE = 500_000
