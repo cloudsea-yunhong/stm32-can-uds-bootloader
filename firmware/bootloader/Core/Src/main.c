@@ -59,6 +59,7 @@ static void MX_USART1_UART_Init(void);
 
 int main(void)
 {
+    __enable_irq();
     /* USER CODE BEGIN 1 */
 
     /* USER CODE END 1 */
@@ -91,7 +92,7 @@ int main(void)
     /* Infinite loop */
     /* USER CODE BEGIN WHILE */
 
-    bsp_uart_printf("\r\n=== CAN Bootloader V1.0 ===\r\n");
+    bsp_uart_printf("\r\n=== CAN Bootloader 启动 ===\r\n");
 
     /* 看门狗上电就开 4 s 擦除时逐扇区喂 */
     boot_init();
@@ -99,16 +100,17 @@ int main(void)
     /* 参数区双 slot 掉电安全 */
     params_init();
 
-    if (boot_decide_and_jump() == BOOT_STAY_IN_BL) {
-        bsp_uart_printf("[boot] stay in bootloader\r\n");
+    /* 跳转成功不会返回；能执行到这里说明要留在 Bootloader，
+       无论是按键、App 请求还是无有效 App，都必须初始化 CAN 和喂狗 */
+    (void)boot_decide_and_jump();
 
-        bsp_can_init();
-        uds_init();
+    bsp_uart_printf("[启动] 停留在 Bootloader\r\n");
+    bsp_can_init();
+    uds_init();
 
-        while (1) {
-            uds_poll();          /* 收帧 → 解析 → 响应；内部有超时与 0x78 */
-            boot_feed_watchdog();
-        }
+    while (1) {
+        uds_poll();          /* 收帧 → 解析 → 响应；内部有超时与 0x78 */
+        boot_feed_watchdog();
     }
 
     while (1) {
@@ -180,17 +182,19 @@ static void MX_GPIO_Init(void)
     __HAL_RCC_GPIOB_CLK_ENABLE();
     __HAL_RCC_GPIOC_CLK_ENABLE();
 
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0, GPIO_PIN_SET);
-    gpio.Pin   = GPIO_PIN_0;
+    /* KEY_BOOT 在 PA0：3V3-510R-按键-PA0，按下为高 */
+    gpio.Pin  = GPIO_PIN_0;
+    gpio.Mode = GPIO_MODE_INPUT;
+    gpio.Pull = GPIO_PULLDOWN;
+    HAL_GPIO_Init(GPIOA, &gpio);
+
+    /* LED_RUN 在 PA1：PA1-510R-LED-3V3，低电平点亮 */
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET);
+    gpio.Pin   = GPIO_PIN_1;
     gpio.Mode  = GPIO_MODE_OUTPUT_PP;
     gpio.Pull  = GPIO_NOPULL;
     gpio.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOC, &gpio);
-
-    gpio.Pin  = GPIO_PIN_13;
-    gpio.Mode = GPIO_MODE_INPUT;
-    gpio.Pull = GPIO_PULLUP;
-    HAL_GPIO_Init(GPIOC, &gpio);
+    HAL_GPIO_Init(GPIOA, &gpio);
     /* USER CODE BEGIN MX_GPIO_Init_2 */
 
     /* USER CODE END MX_GPIO_Init_2 */
@@ -256,9 +260,11 @@ void Error_Handler(void)
     /* USER CODE BEGIN Error_Handler_Debug */
 
     __disable_irq();
-    while (1) {
-        /* 卡死 等看门狗复位或手动断电 */
+    /* 如果时钟/外设初始化失败，IWDG 可能还没启动，这里主动复位一次 */
+    for (volatile uint32_t i = 0U; i < 2000000U; i++) {
+        __NOP();
     }
+    NVIC_SystemReset();
     /* USER CODE END Error_Handler_Debug */
 }
 

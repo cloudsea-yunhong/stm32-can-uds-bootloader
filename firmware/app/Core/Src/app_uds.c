@@ -102,16 +102,20 @@ static void svc_session(const uint8_t *req, uint16_t len)
     send_positive(0x10U, body, 5U);
 
     if (session == 0x02U) {
-        bsp_uart_printf("[app] programming session, hand over to bootloader\r\n");
+        bsp_uart_printf("[应用] 进入编程会话，交权给引导程序\r\n");
         /* 先回响应 再写 BKP 最后复位 反过来主机会收不到响应 */
         app_request_upgrade();
+        /* 先把 CAN 停干净，避免复位后引导程序初始化 CAN 卡住 */
+        (void)HAL_CAN_Stop(&hcan1);
+        (void)HAL_CAN_DeInit(&hcan1);
+        __HAL_RCC_CAN1_CLK_DISABLE();
         HAL_Delay(50U);
         NVIC_SystemReset();
     }
 
     s_session = session;
     s_s3_tick = HAL_GetTick();
-    bsp_uart_printf("[app] session 0x%02X\r\n", session);
+    bsp_uart_printf("[应用] 会话 0x%02X\r\n", session);
 }
 
 static void svc_reset(const uint8_t *req, uint16_t len)
@@ -249,7 +253,7 @@ void app_uds_init(void)
     s_seed_level = 0U;
     s_attempts = 0U;
     s_s3_tick = HAL_GetTick();
-    bsp_uart_printf("[app] uds ready\r\n");
+    bsp_uart_printf("[应用] UDS 就绪\r\n");
 }
 
 void app_uds_poll(void)

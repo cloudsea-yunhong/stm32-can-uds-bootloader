@@ -26,7 +26,6 @@
 #include "app_uds.h"
 #include "app_boot.h"
 #include "params.h"
-#include <math.h>
 
 /* USER CODE BEGIN Includes */
 
@@ -61,6 +60,8 @@ static void app_iwdg_init(void);
 
 int main(void)
 {
+    /* Bootloader 跳转前关了全局中断，这里要第一时间打开 */
+    __enable_irq();
     /* USER CODE BEGIN 1 */
 
     /* USER CODE END 1 */
@@ -90,6 +91,7 @@ int main(void)
     MX_GPIO_Init();
     MX_USART1_UART_Init();
     app_iwdg_init();
+    params_init();          /* 必须先加载参数区，后面的 DID/确认才正确 */
 
     /* USER CODE BEGIN 2 */
 
@@ -98,9 +100,9 @@ int main(void)
     /* Infinite loop */
     /* USER CODE BEGIN WHILE */
 
-    bsp_uart_printf("\r\n=== App V1.2.3 @ 0x%08lX ===\r\n",
+    bsp_uart_printf("\r\n=== 应用程序 V1.2.3 @ 0x%08lX ===\r\n",
                     (unsigned long)APP_START_ADDR);
-    bsp_uart_printf("[app] VTOR = 0x%08lX\r\n", (unsigned long)SCB->VTOR);
+    bsp_uart_printf("[应用] 向量表 = 0x%08lX\r\n", (unsigned long)SCB->VTOR);
 
     bsp_can_init();
     app_uds_init();
@@ -109,7 +111,7 @@ int main(void)
         uint32_t start = HAL_GetTick();
         uint8_t  confirmed = 0U;
         uint32_t last_led = 0U;
-        uint32_t last_print = 0U;
+        uint32_t last_confirm = 0U;
 
         while (1) {
     /* USER CODE END WHILE */
@@ -121,25 +123,19 @@ int main(void)
             /* 5 s 后确认启动成功 要放在业务真正跑起来之后
                APP_SKIP_CONFIRM 可以跳过确认 用来演示回滚 */
 #ifndef APP_SKIP_CONFIRM
-            if ((confirmed == 0U) && ((HAL_GetTick() - start) > BOOT_CONFIRM_DELAY_MS)) {
+            if ((confirmed == 0U) && ((HAL_GetTick() - start) > BOOT_CONFIRM_DELAY_MS)
+                && ((HAL_GetTick() - last_confirm) > 2000U)) {
+                last_confirm = HAL_GetTick();
                 if (app_confirm_boot() == 0U) {
                     confirmed = 1U;
-                    bsp_uart_printf("[app] boot confirmed\r\n");
+                    bsp_uart_printf("[应用] 启动确认成功\r\n");
                 }
             }
 #endif
 
             if ((HAL_GetTick() - last_led) >= 500U) {
                 last_led = HAL_GetTick();
-                HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_0);
-            }
-
-            if ((HAL_GetTick() - last_print) >= 2000U) {
-                float v = sinf((float)HAL_GetTick() / 1000.0f);
-                last_print = HAL_GetTick();
-                bsp_uart_printf("[app] t=%lu s  sin=%.3f\r\n",
-                                (unsigned long)((HAL_GetTick() - start) / 1000U),
-                                (double)v);
+                HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_1);
             }
         }
     }
@@ -229,12 +225,13 @@ static void MX_GPIO_Init(void)
     __HAL_RCC_GPIOB_CLK_ENABLE();
     __HAL_RCC_GPIOC_CLK_ENABLE();
 
-    HAL_GPIO_WritePin(GPIOC, GPIO_PIN_0, GPIO_PIN_SET);
-    gpio.Pin   = GPIO_PIN_0;
+    /* LED_RUN 在 PA1：PA1-510R-LED-3V3，低电平点亮 */
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_1, GPIO_PIN_SET);
+    gpio.Pin   = GPIO_PIN_1;
     gpio.Mode  = GPIO_MODE_OUTPUT_PP;
     gpio.Pull  = GPIO_NOPULL;
     gpio.Speed = GPIO_SPEED_FREQ_LOW;
-    HAL_GPIO_Init(GPIOC, &gpio);
+    HAL_GPIO_Init(GPIOA, &gpio);
     /* USER CODE BEGIN MX_GPIO_Init_2 */
 
     /* USER CODE END MX_GPIO_Init_2 */
@@ -300,8 +297,10 @@ void Error_Handler(void)
     /* USER CODE BEGIN Error_Handler_Debug */
 
     __disable_irq();
-    while (1) {
+    for (volatile uint32_t i = 0U; i < 2000000U; i++) {
+        __NOP();
     }
+    NVIC_SystemReset();
     /* USER CODE END Error_Handler_Debug */
 }
 

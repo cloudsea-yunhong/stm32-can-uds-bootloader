@@ -11,11 +11,22 @@ static can_frame_t s_ring[CAN_RX_RING_SIZE];
 static volatile uint8_t s_head;
 static volatile uint8_t s_tail;
 static volatile uint32_t s_busoff_count;
+static volatile uint32_t s_drop_count;
 static volatile uint8_t s_busoff_flag;
 
 void bsp_can_init(void)
 {
     CAN_FilterTypeDef filter = {0};
+
+    /* App 交权过来时 CAN 可能停在异常状态，先复位外设再初始化 */
+    __HAL_RCC_CAN1_CLK_ENABLE();
+    __HAL_RCC_CAN1_FORCE_RESET();
+    __HAL_RCC_CAN1_RELEASE_RESET();
+    /* 等外设稳定一下，顺便喂狗 */
+    for (volatile uint32_t i = 0U; i < 200000U; i++) {
+        __NOP();
+    }
+    HAL_IWDG_Refresh(&hiwdg);
 
     hcan1.Instance                  = CAN1;
     hcan1.Init.Prescaler            = 6U;
@@ -30,9 +41,10 @@ void bsp_can_init(void)
     hcan1.Init.TransmitFifoPriority = DISABLE;
     hcan1.Init.Mode                 = CAN_MODE_NORMAL;
     if (HAL_CAN_Init(&hcan1) != HAL_OK) {
-        bsp_uart_printf("[can] init failed\r\n");
+        bsp_uart_printf("[CAN] 初始化失败\r\n");
         Error_Handler();
     }
+    bsp_uart_printf("[CAN] HAL 初始化完成\r\n");
 
     filter.FilterBank           = 0;
     filter.FilterMode           = CAN_FILTERMODE_IDMASK;
@@ -51,16 +63,16 @@ void bsp_can_init(void)
     if (HAL_CAN_Start(&hcan1) != HAL_OK) {
         Error_Handler();
     }
-    if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING
-                                          | CAN_IT_BUSOFF
+    if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_BUSOFF
                                           | CAN_IT_ERROR_PASSIVE) != HAL_OK) {
         Error_Handler();
     }
 
     s_head = s_tail = 0U;
     s_busoff_count = 0U;
+    s_drop_count = 0U;
     s_busoff_flag = 0U;
-    bsp_uart_printf("[can] 500 kbps, filter 0x%03lX\r\n", (unsigned long)UDS_REQ_ID);
+    bsp_uart_printf("[CAN] 500 kbps，接收 ID 0x%03lX\r\n", (unsigned long)UDS_REQ_ID);
 }
 
 uint8_t bsp_can_send(uint32_t id, const uint8_t *data, uint8_t dlc)
@@ -96,6 +108,30 @@ uint8_t bsp_can_recv(can_frame_t *frame, uint32_t timeout_ms)
     uint32_t start = HAL_GetTick();
 
     while (1) {
+        /* 轮询 FIFO，避免丢中断时整条链路卡死 */
+        {
+            CAN_RxHeaderTypeDef rx;
+            uint8_t data[8];
+            uint8_t next;
+            while (HAL_CAN_GetRxFifoFillLevel(&hcan1, CAN_RX_FIFO0) > 0U) {
+                if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &rx, data) != HAL_OK) {
+                    break;
+                }
+                if ((rx.IDE != CAN_ID_STD) || (rx.RTR != CAN_RTR_DATA)) {
+                    continue;
+                }
+                next = (uint8_t)((s_head + 1U) % CAN_RX_RING_SIZE);
+                if (next == s_tail) {
+                    s_tail = (uint8_t)((s_tail + 1U) % CAN_RX_RING_SIZE);
+                }
+                s_ring[s_head].id  = rx.StdId;
+                s_ring[s_head].dlc = (uint8_t)rx.DLC;
+                for (uint8_t i = 0U; i < 8U; i++) {
+                    s_ring[s_head].data[i] = data[i];
+                }
+                s_head = next;
+            }
+        }
         if (s_tail != s_head) {
             *frame = s_ring[s_tail];
             s_tail = (uint8_t)((s_tail + 1U) % CAN_RX_RING_SIZE);
@@ -130,8 +166,9 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
 
     next = (uint8_t)((s_head + 1U) % CAN_RX_RING_SIZE);
     if (next == s_tail) {
-        /* 队列满就丢最旧帧 ISR 不能阻塞 */
-        s_tail = (uint8_t)((s_tail + 1U) % CAN_RX_RING_SIZE);
+        /* 队列满就丢新帧，不要动 tail，tail 只由主循环推进 */
+        s_drop_count++;
+        return;
     }
     s_ring[s_head].id  = rx.StdId;
     s_ring[s_head].dlc = (uint8_t)rx.DLC;
@@ -152,12 +189,13 @@ void HAL_CAN_ErrorCallback(CAN_HandleTypeDef *hcan)
     }
 }
 
-/* bus-off 恢复放主循环 手册推荐重新初始化 这里用 Start/Stop 省事
+/* bus-off 恢复放主循环：重新初始化 CAN，清错误计数
    别一检测到就狂重启 加 100 ms 间隔 */
 void bsp_can_poll_recovery(void)
 {
     static uint32_t last_ms = 0U;
     uint32_t now;
+    uint32_t n;
 
     if (s_busoff_flag == 0U) {
         return;
@@ -169,11 +207,12 @@ void bsp_can_poll_recovery(void)
     last_ms = now;
     s_busoff_flag = 0U;
 
+    n = s_busoff_count;
     (void)HAL_CAN_Stop(&hcan1);
-    (void)HAL_CAN_Start(&hcan1);
-    (void)HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING
-                                            | CAN_IT_BUSOFF
-                                            | CAN_IT_ERROR_PASSIVE);
+    (void)HAL_CAN_DeInit(&hcan1);
+    bsp_can_init();                       /* 重新配过滤器/中断，清 TEC */
+    s_busoff_count = n;
     bsp_uart_printf("[can] bus-off recovered (%lu)\r\n",
                     (unsigned long)s_busoff_count);
 }
+

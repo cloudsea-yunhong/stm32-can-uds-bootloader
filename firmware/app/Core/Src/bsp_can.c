@@ -1,4 +1,4 @@
-/* bsp_can.c CAN1 驱动 500 kbps、过滤器、环形接收、bus-off 恢复 */
+﻿/* bsp_can.c CAN1 驱动 500 kbps、过滤器、环形接收、bus-off 恢复 */
 #include "bsp_can.h"
 #include "project_config.h"
 #include "bsp_uart.h"
@@ -30,7 +30,7 @@ void bsp_can_init(void)
     hcan1.Init.TransmitFifoPriority = DISABLE;
     hcan1.Init.Mode                 = CAN_MODE_NORMAL;
     if (HAL_CAN_Init(&hcan1) != HAL_OK) {
-        bsp_uart_printf("[can] init failed\r\n");
+        bsp_uart_printf("[CAN] 初始化失败\r\n");
         Error_Handler();
     }
 
@@ -51,8 +51,7 @@ void bsp_can_init(void)
     if (HAL_CAN_Start(&hcan1) != HAL_OK) {
         Error_Handler();
     }
-    if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING
-                                          | CAN_IT_BUSOFF
+    if (HAL_CAN_ActivateNotification(&hcan1, CAN_IT_BUSOFF
                                           | CAN_IT_ERROR_PASSIVE) != HAL_OK) {
         Error_Handler();
     }
@@ -60,7 +59,7 @@ void bsp_can_init(void)
     s_head = s_tail = 0U;
     s_busoff_count = 0U;
     s_busoff_flag = 0U;
-    bsp_uart_printf("[can] 500 kbps, filter 0x%03lX\r\n", (unsigned long)UDS_REQ_ID);
+    bsp_uart_printf("[CAN] 500 kbps，接收 ID 0x%03lX\r\n", (unsigned long)UDS_REQ_ID);
 }
 
 uint8_t bsp_can_send(uint32_t id, const uint8_t *data, uint8_t dlc)
@@ -96,6 +95,30 @@ uint8_t bsp_can_recv(can_frame_t *frame, uint32_t timeout_ms)
     uint32_t start = HAL_GetTick();
 
     while (1) {
+        /* 轮询 FIFO，避免丢中断时整条链路卡死 */
+        {
+            CAN_RxHeaderTypeDef rx;
+            uint8_t data[8];
+            uint8_t next;
+            while (HAL_CAN_GetRxFifoFillLevel(&hcan1, CAN_RX_FIFO0) > 0U) {
+                if (HAL_CAN_GetRxMessage(&hcan1, CAN_RX_FIFO0, &rx, data) != HAL_OK) {
+                    break;
+                }
+                if ((rx.IDE != CAN_ID_STD) || (rx.RTR != CAN_RTR_DATA)) {
+                    continue;
+                }
+                next = (uint8_t)((s_head + 1U) % CAN_RX_RING_SIZE);
+                if (next == s_tail) {
+                    s_tail = (uint8_t)((s_tail + 1U) % CAN_RX_RING_SIZE);
+                }
+                s_ring[s_head].id  = rx.StdId;
+                s_ring[s_head].dlc = (uint8_t)rx.DLC;
+                for (uint8_t i = 0U; i < 8U; i++) {
+                    s_ring[s_head].data[i] = data[i];
+                }
+                s_head = next;
+            }
+        }
         if (s_tail != s_head) {
             *frame = s_ring[s_tail];
             s_tail = (uint8_t)((s_tail + 1U) % CAN_RX_RING_SIZE);
@@ -170,9 +193,9 @@ void bsp_can_poll_recovery(void)
 
     (void)HAL_CAN_Stop(&hcan1);
     (void)HAL_CAN_Start(&hcan1);
-    (void)HAL_CAN_ActivateNotification(&hcan1, CAN_IT_RX_FIFO0_MSG_PENDING
-                                            | CAN_IT_BUSOFF
+    (void)HAL_CAN_ActivateNotification(&hcan1, CAN_IT_BUSOFF
                                             | CAN_IT_ERROR_PASSIVE);
-    bsp_uart_printf("[can] bus-off recovered (%lu)\r\n",
+    bsp_uart_printf("[CAN] 总线关闭已恢复 (%lu)\r\n",
                     (unsigned long)s_busoff_count);
 }
+

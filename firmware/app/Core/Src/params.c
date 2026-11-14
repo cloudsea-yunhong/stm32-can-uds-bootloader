@@ -87,13 +87,13 @@ void params_init(void)
         params_default(&s_current);
         s_current_slot = 0U;
         (void)params_set(&s_current);
-        bsp_uart_printf("[param] no valid slot, init default\r\n");
+        bsp_uart_printf("[参数] 无有效记录，使用默认值\r\n");
         return;
     }
-    bsp_uart_printf("[param] slot %c seq %lu active %lu\r\n",
+    bsp_uart_printf("[参数] 记录区=%c 序号=%lu 启动区=%c\r\n",
                     (s_current_slot == 0U) ? 'A' : 'B',
                     (unsigned long)s_current.seq,
-                    (unsigned long)s_current.active_slot);
+                    (s_current.active_slot == 0U) ? 'A' : 'B');
 }
 
 uint8_t params_get(BootParam *out)

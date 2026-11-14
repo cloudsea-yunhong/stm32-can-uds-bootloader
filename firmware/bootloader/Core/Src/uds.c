@@ -122,7 +122,7 @@ static void svc_session(const uint8_t *req, uint16_t len)
         send_positive(0x10U, body, 5U);
     }
     (void)resp;
-    bsp_uart_printf("[uds] session 0x%02X\r\n", session);
+    bsp_uart_printf("[UDS] 会话 0x%02X\r\n", session);
 }
 
 static void svc_reset(const uint8_t *req, uint16_t len)
@@ -255,14 +255,15 @@ static void svc_security(const uint8_t *req, uint16_t len)
 
 static uint8_t range_is_app(uint32_t addr, uint32_t size)
 {
-    if ((addr & 0x3U) != 0U) {
+    if ((size == 0U) || ((addr & 0x3U) != 0U)) {
         return 0U;
     }
-    if ((addr >= APP_A_ADDR) && ((addr + size) <= (APP_A_ADDR + APP_A_SIZE))) {
-        return 1U;
+    /* 先判断起点再算剩余长度，避免 addr + size 溢出绕过校验 */
+    if ((addr >= APP_A_ADDR) && (addr < (APP_A_ADDR + APP_A_SIZE))) {
+        return (size <= ((APP_A_ADDR + APP_A_SIZE) - addr)) ? 1U : 0U;
     }
-    if ((addr >= APP_B_ADDR) && ((addr + size) <= (APP_B_ADDR + APP_B_SIZE))) {
-        return 2U;
+    if ((addr >= APP_B_ADDR) && (addr < (APP_B_ADDR + APP_B_SIZE))) {
+        return (size <= ((APP_B_ADDR + APP_B_SIZE) - addr)) ? 2U : 0U;
     }
     return 0U;
 }
@@ -329,9 +330,12 @@ static void svc_routine(const uint8_t *req, uint16_t len)
             return;
         }
         send_negative(0x31U, NRC_RESPONSE_PENDING);
-        if (flash_if_crc32(addr, size) != crc) {
-            send_negative(0x31U, NRC_PROGRAMMING_FAILURE);
-            return;
+        {
+            uint32_t actual_crc = flash_if_crc32(addr, size);
+            if (actual_crc != crc) {
+                send_negative(0x31U, NRC_PROGRAMMING_FAILURE);
+                return;
+            }
         }
         s_flash_crc = crc;
 
@@ -384,10 +388,11 @@ static void svc_download(const uint8_t *req, uint16_t len)
         send_negative(0x34U, NRC_SECURITY_DENIED);
         return;
     }
-    addr = ((uint32_t)req[4] << 24) | ((uint32_t)req[5] << 16)
-         | ((uint32_t)req[6] << 8) | req[7];
-    size = ((uint32_t)req[8] << 24) | ((uint32_t)req[9] << 16)
-         | ((uint32_t)req[10] << 8) | req[11];
+    /* 0x34: SID + DFI + ALFID + addr[4] + size[4] */
+    addr = ((uint32_t)req[3] << 24) | ((uint32_t)req[4] << 16)
+         | ((uint32_t)req[5] << 8) | req[6];
+    size = ((uint32_t)req[7] << 24) | ((uint32_t)req[8] << 16)
+         | ((uint32_t)req[9] << 8) | req[10];
     if (range_is_app(addr, size) == 0U) {
         send_negative(0x34U, NRC_OUT_OF_RANGE);
         return;
@@ -491,7 +496,7 @@ void uds_init(void)
     s_download_size = 0U;
     s_write_offset = 0U;
     s_last_block = 0U;
-    bsp_uart_printf("[uds] ready (0x%03lX/0x%03lX)\r\n",
+    bsp_uart_printf("[UDS] 就绪 (0x%03lX/0x%03lX)\r\n",
                     (unsigned long)UDS_REQ_ID, (unsigned long)UDS_RESP_ID);
 }
 
@@ -504,7 +509,7 @@ void uds_poll(void)
         ((HAL_GetTick() - s_s3_tick) > UDS_S3_MS)) {
         s_session = 0x01U;
         s_unlocked = 0U;
-        bsp_uart_printf("[uds] S3 timeout -> default session\r\n");
+        bsp_uart_printf("[UDS] 5 秒无通信，回到默认会话\r\n");
     }
 
     ret = isotp_recv(s_rx, sizeof(s_rx), &len, 10U);

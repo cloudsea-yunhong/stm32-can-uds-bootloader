@@ -97,7 +97,10 @@ uint8_t boot_jump_to_app(uint32_t app_addr, uint32_t app_size)
         NVIC->ICPR[i] = 0xFFFFFFFFU;
     }
 
-    HAL_CAN_DeInit(&hcan1);                 /* CAN 停在 bus-off 时 App 收不到帧 */
+    /* 跳转路径上 CAN 可能还没初始化，Instance 为空时 DeInit 会写空指针 */
+    if (hcan1.Instance != 0) {
+        (void)HAL_CAN_DeInit(&hcan1);
+    }
     __HAL_RCC_CAN1_CLK_DISABLE();
     __HAL_RCC_GPIOB_CLK_DISABLE();
 
@@ -114,10 +117,11 @@ uint8_t boot_jump_to_app(uint32_t app_addr, uint32_t app_size)
     __DSB();
     __ISB();
 
-    __set_MSP(sp);
-    ((app_entry_t)pc)();
-
-    return 2U;
+    /* MSP 一换，C 局部变量就可能从新栈上取到 0，必须在同一段汇编里完成
+       “装 MSP + 跳转”，保证 sp/pc 已经在寄存器里 */
+    __disable_irq();
+    __ASM volatile ("msr msp, %0\n\tbx %1" :: "r" (sp), "r" (pc));
+    __builtin_unreachable();
 }
 
 /* 启动前把整片固件 CRC 一遍 192 KB 用硬件不到 1 ms 比只看头部靠谱
@@ -139,14 +143,14 @@ uint8_t boot_decide_and_jump(void)
 
     params_get(&p);
 
-    if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == GPIO_PIN_RESET) {
-        bsp_uart_printf("[boot] KEY_BOOT pressed\r\n");
+    if (HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_0) == GPIO_PIN_SET) {
+        bsp_uart_printf("[启动] 按键强制刷写\r\n");
         return BOOT_STAY_IN_BL_KEY;
     }
 
     if (boot_upgrade_requested()) {
         boot_clear_upgrade_request();
-        bsp_uart_printf("[boot] upgrade requested by App\r\n");
+        bsp_uart_printf("[启动] App 请求升级\r\n");
         return BOOT_STAY_IN_BL_UPGRADE;
     }
 
@@ -161,7 +165,7 @@ uint8_t boot_decide_and_jump(void)
         addr = (other == 0U) ? APP_A_ADDR : APP_B_ADDR;
         size = (other == 0U) ? APP_A_SIZE : APP_B_SIZE;
         if (!boot_app_header_valid(addr, size)) {
-            bsp_uart_printf("[boot] no valid app\r\n");
+            bsp_uart_printf("[启动] 没有有效 App\r\n");
             return BOOT_STAY_IN_BL_BLANK;
         }
         p.active_slot = other;
@@ -180,17 +184,17 @@ uint8_t boot_decide_and_jump(void)
                 p.active_slot = other;
                 p.boot_count  = 0U;
                 (void)params_set(&p);
-                bsp_uart_printf("[boot] rollback to slot %c\r\n",
+                bsp_uart_printf("[启动] 回滚到 %c 区\r\n",
                                 (other == 0U) ? 'A' : 'B');
                 addr = o_addr;
                 size = o_size;
             } else {
-                bsp_uart_printf("[boot] both slots invalid\r\n");
+                bsp_uart_printf("[启动] 两个区都无效\r\n");
                 return BOOT_STAY_IN_BL_BLANK;
             }
         } else {
             (void)params_set(&p);
-            bsp_uart_printf("[boot] boot_count=%lu (pending)\r\n",
+            bsp_uart_printf("[启动] 启动次数=%lu（待确认）\r\n",
                             (unsigned long)p.boot_count);
         }
     }
@@ -199,12 +203,19 @@ uint8_t boot_decide_and_jump(void)
         other = (uint8_t)(1U - p.active_slot);
         uint32_t o_addr = (other == 0U) ? APP_A_ADDR : APP_B_ADDR;
         uint32_t o_size = (other == 0U) ? APP_A_SIZE : APP_B_SIZE;
-        bsp_uart_printf("[boot] CRC mismatch on slot %c\r\n",
+        bsp_uart_printf("[启动] %c 区 CRC 校验失败\r\n",
                         (p.active_slot == 0U) ? 'A' : 'B');
         if (boot_app_header_valid(o_addr, o_size) &&
             app_crc_ok(&p, o_addr, o_size)) {
-            bsp_uart_printf("[boot] fallback to slot %c\r\n",
+            bsp_uart_printf("[启动] 回退到 %c 区\r\n",
                             (other == 0U) ? 'A' : 'B');
+            /* 回退必须写回参数区，否则 App 确认的还是坏区 */
+            p.slot_valid[p.active_slot] = SLOT_INVALID;
+            p.active_slot = other;
+            p.boot_count  = 0U;
+            if (params_set(&p) != 0U) {
+                return BOOT_STAY_IN_BL;
+            }
             addr = o_addr;
             size = o_size;
         } else {
@@ -212,7 +223,7 @@ uint8_t boot_decide_and_jump(void)
         }
     }
 
-    bsp_uart_printf("[boot] jump to 0x%08lX\r\n", (unsigned long)addr);
+    bsp_uart_printf("[启动] 跳转到 App：0x%08lX\r\n", (unsigned long)addr);
     (void)boot_jump_to_app(addr, size);
 
     return BOOT_STAY_IN_BL;
