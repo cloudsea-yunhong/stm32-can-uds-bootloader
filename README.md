@@ -1,4 +1,4 @@
-# STM32 CAN 双区 Bootloader 与 UDS OTA 升级
+﻿# STM32 CAN 双区 Bootloader 与 UDS OTA 升级
 
 基于 STM32F407 的 CAN 总线双区 Bootloader：上位机通过 UDS over ISO-TP 把固件写入另一块应用区，支持 A/B 切换、启动 CRC 校验、连续 3 次未确认自动回滚。PC 端与板端各实现一遍协议，附假 ECU，没有硬件也能跑通全流程。
 
@@ -49,12 +49,15 @@ PC 端（Python）                         板端（C）
 │   ├── app/               App 工程（A: 0x08010000 / B: 0x08040000）
 │   │   ├── Core/          main / app_uds / app_boot
 │   │   └── MDK-ARM/       App.uvprojx（A 区）、App_B.uvprojx（B 区）
-│   └── prebuilt/          可直接烧录的 hex
+│   └── demo.bin           小测试固件（demo 用）
 ├── tests/                 CRC / ISO-TP / 端到端
 ├── docs/verification.md   编译、测试与实测数据
 ├── requirements.txt
 └── README.md
 ```
+
+> `MDK-ARM/Objects*` 只保留可直接烧录的 `.hex` / `.bin` 和 `.sct`；
+> 中间文件 `.o/.axf/.map` 已清理，Keil 重新编译会自动生成。
 
 ## 快速开始
 
@@ -75,9 +78,7 @@ python host/cli.py rollback --to a --fake
 ### 2. 跑测试
 
 ```bash
-python tests/test_crc.py
-python tests/test_isotp.py
-python tests/test_flash.py
+python -m unittest discover -s tests -v
 ```
 
 ### 3. 固件编译（Keil MDK + Arm Compiler 6）
@@ -88,16 +89,18 @@ python tests/test_flash.py
 | `firmware/app/MDK-ARM/App.uvprojx` | 0x08010000 | `app.hex` |
 | `firmware/app/MDK-ARM/App_B.uvprojx` | 0x08040000 | `app_b.hex` |
 
-三个工程均 0 error / 0 warning。Bootloader 22.4 KB（预算 32 KB），App 20.3 KB（预算 192 KB）。
+三个工程均 0 error / 0 warning。Bootloader 约 28 KB（预算 32 KB），App 约 21 KB（预算 192 KB）。
 
 ### 4. 接真硬件
 
 ```bash
 # candleLight / gs_usb
-python host/cli.py flash --bin firmware/app/app_b.hex --addr 0x08040000 --backend gs_usb --area 1
+python host/cli.py flash --bin firmware/app/MDK-ARM/Objects_B/app_b.bin --addr 0x08040000 --backend gs_usb --area 1
 ```
 
 烧录顺序：Bootloader → 0x08000000，App-A → 0x08010000，App-B → 0x08040000。
+
+> 直接烧 App hex 不会更新参数区里的 CRC，Bootloader 会判 CRC 失败。整片恢复请用 `flash_all.bat`（先全片擦除，再从 A 区启动）；只升级 App 请用 CAN OTA。
 
 ## 协议约定
 
@@ -125,11 +128,11 @@ python host/cli.py flash --bin firmware/app/app_b.hex --addr 0x08040000 --backen
 
 | 项 | 数据 |
 |---|---|
-| 上位机 + 假 ECU | 15 个测试通过；端到端 3000 字节 / 5 块 / 0.81 s |
-| Bootloader 编译 | 22.4 KB（Code 21,496 + RO 1,148 + RW 12），0 error 0 warning |
-| App-A / App-B 编译 | 20.3 KB（Code 19,708 + RO 1,100 + RW 12），0 error 0 warning |
-| 上板刷写 / 切区 | 跳转 33 ms；64 KB 升级 7.8 s；回滚第 3 次触发 |
-| 总线电气 | 位宽 2.02 μs；终端电阻 60.2 Ω |
+| 上位机 + 假 ECU | 15 个测试通过（1.35 s） |
+| Bootloader 编译 | 约 28 KB，0 error 0 warning |
+| App-A / App-B 编译 | 约 21 KB，0 error 0 warning |
+| 上板 OTA | App-A 21216 字节 / 34 块 / 约 2.3 s；App-B 21216 字节 / 34 块 / 约 2.7 s；A/B 连续刷通过 |
+| 启动确认 | App 启动 5 秒后打印 `[应用] 启动确认成功` |
 
 测量条件与明细见 [docs/verification.md](docs/verification.md)。
 

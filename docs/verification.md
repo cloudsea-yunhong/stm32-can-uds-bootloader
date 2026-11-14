@@ -1,86 +1,80 @@
 # 验证记录
 
-只记录**已经跑过、可复现**的结果。编译、单元测试、端到端与上板实测数据均标注测量条件。
+日期：2026-11-14  
+环境：Windows + PCAN-USB + STM32F407VET6 + CH340  
+代码：当前工作区版本（含 App `params_init()` 修复）
 
----
-
-## 1. 编译
-
-工具链：Keil MDK 5.43a + Arm Compiler 6.24（AC6），优化 Level 1。
-
-| 工程 | Code | RO-data | RW-data | 合计 | 预算 | 结果 |
-|---|---|---|---|---|---|---|
-| Bootloader | 21,496 B | 1,148 B | 12 B | 22.4 KB | 32 KB（70%） | 0 error / 0 warning |
-| App-A | 19,708 B | 1,100 B | 12 B | 20.3 KB | 192 KB（10.6%） | 0 error / 0 warning |
-| App-B | 19,708 B | 1,100 B | 12 B | 20.3 KB | 192 KB（10.6%） | 0 error / 0 warning |
-
-## 2. 单元测试（15 个）
+## 1. 上位机自动化测试（无硬件）
 
 ```bash
-python tests/test_crc.py      # 4 个：两实现一致、与 zlib 不同、补位、空数据
-python tests/test_isotp.py    # 6 个：1/7/8/200/4095 字节、超时
-python tests/test_flash.py    # 5 个：读版本、会话+解锁、切区、2000 字节刷写、错误 CRC 被拒
+cd can-flasher
+.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-全部通过
+结果：
 
-## 3. 虚拟总线端到端
+```
+Ran 15 tests in 1.349s
+OK
+```
+
+覆盖：CRC 算法、ISO-TP 单帧/多帧/序号/超时、FakeEcu 完整刷写、错误 CRC 拒绝。
+
+## 2. PCAN 与板端链路
 
 ```bash
-python host/cli.py flash --bin firmware/demo.bin --addr 0x08040000 --fake --area 1
+.venv\Scripts\python.exe tools\test_pcan.py
+.venv\Scripts\python.exe tools\can_probe.py
 ```
 
-结果：3000 字节 / 5 块 / 0.81 s，擦除 → 0x34 → 5 次 0x36 → 0x37 → CRC 校验 → 切区 → 复位，全流程通过。
+结果：
 
-`0.81 s` 含交权后固定等待的 0.8 s，实际协议交互约 10 ms 量级。
+```
+[ OK ] PCAN_USBBUS1 已打开，500 kbps
+已发送 0x7E0: 02 10 03
+适配器状态： BusState.ACTIVE
+收到 0x7E8: 06 50 03 00 32 01 f4 00
+```
 
-## 4. 上板实测
+## 3. CAN OTA 实测
 
-**测试条件**
-
-- 目标板：STM32F407VET6 最小系统板 ×2
-- 收发器：SN65HVD230 ×2（板载 120 Ω）
-- 适配器：USB-CAN（gs_usb）
-- 固件：Bootloader 22.4 KB，App 20.3 KB；升级镜像 64 KB
-- 代码版本：`e0d13dd`
-- 日期：2026-10-30
-
-| # | 项 | 实测 | 方法 | 结论 |
+| 目标 | 固件大小 | 块数 | 耗时 | 结果 |
 |---|---|---|---|---|
-| 1 | Bootloader 跳转时间 | **33 ms** | 逻辑分析仪：上电沿 → App 首帧串口 | ✅ |
-| 2 | 64 KB 升级耗时 | **7.8 s** | 上位机计时：擦除 → CRC 通过 | ✅ |
-| 3 | 启动 CRC 耗时 | **0.5 ms** | 逻辑分析仪 | ✅ |
-| 4 | CAN 位宽 | **2.02 μs** | 逻辑分析仪 | ✅ |
-| 5 | 总线电阻（断电） | **60.2 Ω** | 万用表量 CANH-CANL | ✅ |
-| 6 | 回滚触发 | **第 3 次** | `APP_SKIP_CONFIRM` 固件，串口看 `boot_count` | ✅ |
+| App-A | 21216 字节 | 34 | 2.29 s | CRC 通过，切 A 区 |
+| App-B | 21216 字节 | 34 | 2.71 s | CRC 通过，切 B 区 |
 
-> 以上为单次测量，未做多次平均；需要时补 3 次均值与波动范围。
-> 位宽 2.02 μs 对应约 495 kbps。
+连续执行 A → B 两次均成功，复位后 `22 FF00` 读回：
 
-### 记录规则
+```
+A 区：DID 0xFF00 -> 00
+B 区：DID 0xFF00 -> 01
+```
 
-- 每项测 3 次，报 均值（最小到最大）
-- 必须记录：固件大小、适配器型号、起止点定义
-- 未达标也记录，写清现象与初步分析
-- 单位统一：ms / s / μs / Ω
-- 每次实测附代码 commit，保证可追溯
+串口启动日志确认：
 
-## 5. 复现步骤
+```
+=== CAN Bootloader 启动 ===
+[参数] 记录区=B 序号=... 启动区=B
+[启动] 跳转到 App：0x08040000
+[参数] 记录区=B 序号=... 启动区=B
+=== 应用程序 V1.2.3 @ 0x08040000 ===
+[应用] 向量表 = 0x08040000
+[CAN] 500 kbps，接收 ID 0x7E0
+[应用] UDS 就绪
+[应用] 启动确认成功
+```
+
+## 4. ST-Link 全片恢复
 
 ```bash
-# 1) 环境
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-
-# 2) 无硬件跑通全流程
-python host/cli.py flash --bin firmware/demo.bin --addr 0x08040000 --fake --area 1
-
-# 3) 测试
-python tests/test_crc.py
-python tests/test_isotp.py
-python tests/test_flash.py
-
-# 4) 接真硬件
-python host/cli.py flash --bin firmware/app/app_b.hex --addr 0x08040000 --backend gs_usb --area 1
+flash_all.bat
 ```
+
+流程：`-ME` 全片擦除 → Bootloader → App-A → App-B → 复位。  
+结果：`ALL OK`；参数区被清空后 Bootloader 使用默认参数，从 A 区启动，App 5 秒后重新确认。
+
+## 5. 说明
+
+- 旧版记录里的“跳转 33 ms、64 KB 升级 7.8 s、CAN 位宽 2.02 μs”来自旧固件/旧适配器，**本版本未复测**，不再作为当前结论引用。
+- OTA 耗时包含握手、擦除、传输、CRC、切区和复位，受固件大小、PCAN 驱动、USB 环境影响，单次数据仅供参考。
+- 复测时请记录：固件大小、适配器型号、板子版本、代码 commit。
