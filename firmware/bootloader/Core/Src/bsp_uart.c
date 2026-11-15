@@ -5,6 +5,10 @@
 
 extern UART_HandleTypeDef huart1;
 
+void bsp_uart_init(void)
+{
+}
+
 void bsp_uart_printf(const char *fmt, ...)
 {
     char buf[160];

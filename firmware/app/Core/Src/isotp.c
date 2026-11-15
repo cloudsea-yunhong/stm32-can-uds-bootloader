@@ -10,7 +10,6 @@
 
 void isotp_init(void)
 {
-    /* 没有持久状态 先留空 */
 }
 
 static uint8_t send_frame(const uint8_t *data, uint8_t len)
