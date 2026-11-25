@@ -1,5 +1,6 @@
 @echo off
-echo 刷写 B 区（自动交权）...
+chcp 65001 >nul
+echo 鍒峰啓 B 鍖猴紙CAN OTA锛岃嚜鍔ㄤ氦鏉冿級...
 cd /d "%~dp0host"
-"..\.venv\Scripts\python.exe" cli.py --backend pcan --channel PCAN_USBBUS1 flash --bin "..\firmware\app\MDK-ARM\Objects_B\app_b.bin" --addr 0x08040000 --area 1
+"..\.venv\Scripts\python.exe" cli.py --backend pcan --channel PCAN_USBBUS1 flash --bin "..\firmware\release\app_b.bin" --addr 0x08040000 --area 1
 pause

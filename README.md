@@ -66,15 +66,18 @@ CAN 接收改为中断 + 队列：`HAL_CAN_RxFifo0MsgPendingCallback()` 里 `xQu
 │   │   ├── Core/          main / app_uds / app_boot / app_tasks
 │   │   ├── Middlewares/   FreeRTOS V10.3.1（tasks/queue/list + Cortex-M4F port + heap_4）
 │   │   └── MDK-ARM/       App.uvprojx（A 区）、App_B.uvprojx（B 区）
+│   ├── release/           可直接烧录的 hex/bin + SHA256
 │   └── demo.bin           小测试固件（demo 用）
 ├── tests/                 CRC / ISO-TP / 端到端
-├── docs/verification.md   编译、测试与实测数据
+├── docs/
+│   ├── verification.md    编译、测试与实测数据
+│   └── freertos.md        App 侧 FreeRTOS 说明
 ├── requirements.txt
 └── README.md
 ```
 
-> `MDK-ARM/Objects*` 只保留可直接烧录的 `.hex` / `.bin` 和 `.sct`；
-> 中间文件 `.o/.axf/.map` 已清理，Keil 重新编译会自动生成。
+> `firmware/release/` 是提交到仓库的最终可烧录产物，不随 `Objects*` 被忽略。
+> `MDK-ARM/Objects*` 是 Keil 编译中间目录，`.gitignore` 已排除；重新编译后如要更新 release，手动复制 hex/bin。
 
 ## 快速开始
 
@@ -108,16 +111,40 @@ python -m unittest discover -s tests -v
 
 三个工程均 0 error / 0 warning。Bootloader 约 30 KB（预算 32 KB），App 约 26 KB（预算 192 KB）。
 
+### 4. 预编译固件
+
+`firmware/release/` 已放入当前可烧录产物：
+
+```text
+bootloader.hex
+app_a.hex / app_a.bin
+app_b.hex / app_b.bin
+SHA256SUMS.txt
+```
+
+整片恢复直接运行：
+
+```text
+flash_all.bat
+```
+
+只升级 App 运行：
+
+```text
+flash_app_a.bat
+flash_app_b.bat
+```
+
 ### 4. 接真硬件
 
 ```bash
 # candleLight / gs_usb
-python host/cli.py flash --bin firmware/app/MDK-ARM/Objects_B/app_b.bin --addr 0x08040000 --backend gs_usb --area 1
+python host/cli.py flash --bin firmware/release/app_b.bin --addr 0x08040000 --backend gs_usb --area 1
 ```
 
 烧录顺序：Bootloader → 0x08000000，App-A → 0x08010000，App-B → 0x08040000。
 
-> 直接烧 App hex 不会更新参数区里的 CRC，Bootloader 会判 CRC 失败。整片恢复请用 `flash_all.bat`（先全片擦除，再从 A 区启动）；只升级 App 请用 CAN OTA。
+> 整片恢复请用 `flash_all.bat`（读取 `firmware/release/`，先全片擦除，再从 A 区启动）；只升级 App 用 `flash_app_a.bat` / `flash_app_b.bat`，它们也读取 release 目录。
 
 ## 协议约定
 
