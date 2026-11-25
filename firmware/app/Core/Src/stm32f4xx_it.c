@@ -26,6 +26,7 @@
 #include "task.h"
 
 extern void xPortSysTickHandler(void);
+extern volatile uint8_t g_rtos_running;
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -78,7 +79,10 @@ void DebugMon_Handler(void)   { }
 void SysTick_Handler(void)
 {
     HAL_IncTick();
-    xPortSysTickHandler();
+    /* 调度器启动前只喂 HAL；启动后才进入 FreeRTOS tick */
+    if (g_rtos_running != 0U) {
+        xPortSysTickHandler();
+    }
 }
 
 void CAN1_RX0_IRQHandler(void)

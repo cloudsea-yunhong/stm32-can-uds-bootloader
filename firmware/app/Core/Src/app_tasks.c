@@ -19,6 +19,8 @@
 static volatile uint32_t s_uds_beat;
 static volatile uint32_t s_app_beat;
 
+volatile uint8_t g_rtos_running;
+
 static void app_uds_task(void *arg)
 {
     (void)arg;
@@ -105,6 +107,7 @@ void app_tasks_start(void)
                       APP_TASK_PRIO_WDG, NULL);
     configASSERT(ret == pdPASS);
 
+    g_rtos_running = 1U;
     vTaskStartScheduler();
 
     /* 正常不会到这里：堆不够/调度器启动失败 */
