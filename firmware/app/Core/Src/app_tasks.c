@@ -8,9 +8,9 @@
 #include "bsp_uart.h"
 #include "project_config.h"
 
-#define APP_TASK_STACK_UDS   512U
-#define APP_TASK_STACK_APP   256U
-#define APP_TASK_STACK_WDG   128U
+#define APP_TASK_STACK_UDS   1024U
+#define APP_TASK_STACK_APP   512U
+#define APP_TASK_STACK_WDG   256U
 
 #define APP_TASK_PRIO_UDS    4U
 #define APP_TASK_PRIO_APP    3U
@@ -20,11 +20,14 @@ static volatile uint32_t s_uds_beat;
 static volatile uint32_t s_app_beat;
 
 volatile uint8_t g_rtos_running;
+volatile uint32_t g_uds_loops;
+volatile uint32_t g_uds_rx_ok;
 
 static void app_uds_task(void *arg)
 {
     (void)arg;
     for (;;) {
+        g_uds_loops++;
         app_uds_poll();
         s_uds_beat++;
         /* 防止连续收帧时高优先级任务饿死应用/看门狗任务 */

@@ -11,6 +11,8 @@
 #include "task.h"
 #include <string.h>
 
+extern volatile uint32_t g_uds_rx_ok;
+
 #define NRC_SERVICE_NOT_SUPPORTED   0x11U
 #define NRC_SUBFUNC_NOT_SUPPORTED   0x12U
 #define NRC_INCORRECT_LENGTH        0x13U
@@ -267,6 +269,7 @@ void app_uds_poll(void)
         s_unlocked = 0U;
     }
     if (isotp_recv(s_rx, sizeof(s_rx), &len, 10U) == ISOTP_OK) {
+        g_uds_rx_ok++;
         dispatch(s_rx, len);
     }
     bsp_can_poll_recovery();

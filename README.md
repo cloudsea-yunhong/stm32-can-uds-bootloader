@@ -37,9 +37,9 @@ Bootloader 保持裸机（32 KB 预算，启动确定性优先）；**只有 App
 
 | 任务 | 优先级 | 栈（word） | 职责 |
 |---|---:|---:|---|
-| `uds` | 4 | 512 | `app_uds_poll()`：收 ISO-TP、解析 UDS、响应 |
-| `app` | 3 | 256 | 5 s 启动确认、LED、业务心跳 |
-| `wdg` | 2 | 128 | 检查两个业务任务心跳，正常才喂 IWDG |
+| `uds` | 4 | 1024 | `app_uds_poll()`：收 ISO-TP、解析 UDS、响应 |
+| `app` | 3 | 512 | 5 s 启动确认、LED、业务心跳 |
+| `wdg` | 2 | 256 | 检查两个业务任务心跳，正常才喂 IWDG |
 
 CAN 接收改为中断 + 队列：`HAL_CAN_RxFifo0MsgPendingCallback()` 里 `xQueueSendFromISR()`，`bsp_can_recv()` 用 `xQueueReceive()` 阻塞等待，不再忙等 FIFO。
 
@@ -148,8 +148,8 @@ python host/cli.py flash --bin firmware/app/MDK-ARM/Objects_B/app_b.bin --addr 0
 | 上位机 + 假 ECU | 15 个测试通过（约 1.35 s） |
 | Bootloader 编译 | 约 30 KB，0 error 0 warning |
 | App-A / App-B 编译 | 约 26 KB，0 error 0 warning（含 FreeRTOS） |
-| FreeRTOS App 镜像 | 26536 字节 / 42 块（待上板复测 OTA 时间） |
-| 上板 OTA（裸机历史数据） | App-A 21216 字节 / 34 块 / 约 2.3 s；App-B 21216 字节 / 34 块 / 约 2.7 s |
+| FreeRTOS App 镜像 | 26648 字节 / 42 块 |
+| 上板 OTA（FreeRTOS） | App-A 26648 字节 / 42 块 / 2.52 s；App-B 26648 字节 / 42 块 / 2.93 s；A/B 来回切换并启动确认通过 |
 | 启动确认 | App 启动 5 秒后打印 `[应用] 启动确认成功` |
 
 测量条件与明细见 [docs/verification.md](docs/verification.md)。

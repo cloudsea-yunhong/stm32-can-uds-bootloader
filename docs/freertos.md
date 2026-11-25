@@ -9,9 +9,9 @@
 
 | 任务 | 优先级 | 栈（word） | 职责 |
 |---|---:|---:|---|
-| `uds` | 4 | 512 | `app_uds_poll()`，收 ISO-TP、解析 UDS、响应 |
-| `app` | 3 | 256 | 5 s 启动确认、LED、业务心跳 |
-| `wdg` | 2 | 128 | 检查两个业务任务心跳，正常才喂 IWDG |
+| `uds` | 4 | 1024 | `app_uds_poll()`，收 ISO-TP、解析 UDS、响应 |
+| `app` | 3 | 512 | 5 s 启动确认、LED、业务心跳 |
+| `wdg` | 2 | 256 | 检查两个业务任务心跳，正常才喂 IWDG |
 
 ## CAN 接收
 
@@ -45,7 +45,7 @@ CAN1_RX0_IRQHandler
 
 | 宏 | 值 |
 |---|---|
-| `configTOTAL_HEAP_SIZE` | 24 KB |
+| `configTOTAL_HEAP_SIZE` | 32 KB |
 | `configTICK_RATE_HZ` | 1000 |
 | `configMAX_PRIORITIES` | 7 |
 | `configCHECK_FOR_STACK_OVERFLOW` | 2 |
@@ -64,12 +64,16 @@ CAN1_RX0_IRQHandler
 ## 已验证
 
 - App / App_B Keil 构建：0 error / 0 warning；
-- Code 25452 B，RO 1064 B，RW 16 B，ZI 35024 B；
-- `app.bin` / `app_b.bin` 26536 B；
-- 15 个 host 测试通过。
+- Code 25568 B 左右，RO 1064 B，RW 16 B，ZI 43248 B；
+- `app.bin` / `app_b.bin` 26648 B；
+- 15 个 host 测试通过；
+- 上板：App 启动 5 秒确认成功；
+- 上板：`can_probe` 收到 `0x7E8` 响应；
+- 上板：A 区 OTA 26648 B / 42 块 / 2.52 s；
+- 上板：B 区 OTA 26648 B / 42 块 / 2.93 s；
+- 上板：OTA 后 B 区启动确认、切回 A 区启动确认均通过。
 
-## 未验证
+## 说明
 
-- 当前没有连接 ST-Link/PCAN，未上板跑 FreeRTOS 版本；
-- 26536 B 镜像对应 OTA 42 块，实际刷写时间需要上板复测；
-- 任务栈高水位、堆剩余、CAN 中断延迟需要用调试器/运行日志确认。
+- `app_tasks.c` / `bsp_can.c` 里保留了 `g_uds_loops`、`g_can_isr_count` 等调试计数，便于后续观察任务和队列；
+- 如果量产，可移除这些调试变量。

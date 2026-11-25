@@ -15,6 +15,11 @@ static volatile uint32_t s_busoff_count;
 static volatile uint32_t s_drop_count;
 static volatile uint8_t s_busoff_flag;
 
+volatile uint32_t g_can_isr_count;
+volatile uint32_t g_can_q_ok;
+volatile uint32_t g_can_q_drop;
+volatile uint32_t g_can_dequeued;
+
 void bsp_can_init(void)
 {
     CAN_FilterTypeDef filter = {0};
@@ -107,6 +112,7 @@ uint8_t bsp_can_recv(can_frame_t *frame, uint32_t timeout_ms)
     }
     ticks = (timeout_ms == 0U) ? 0U : pdMS_TO_TICKS(timeout_ms);
     if (xQueueReceive(s_rx_queue, frame, ticks) == pdPASS) {
+        g_can_dequeued++;
         return 0U;
     }
     return 1U;
@@ -139,8 +145,12 @@ void HAL_CAN_RxFifo0MsgPendingCallback(CAN_HandleTypeDef *hcan)
     for (uint8_t i = 0U; i < 8U; i++) {
         frame.data[i] = data[i];
     }
+    g_can_isr_count++;
     if (xQueueSendFromISR(s_rx_queue, &frame, &woken) != pdPASS) {
         s_drop_count++;
+        g_can_q_drop++;
+    } else {
+        g_can_q_ok++;
     }
     portYIELD_FROM_ISR(woken);
 }
