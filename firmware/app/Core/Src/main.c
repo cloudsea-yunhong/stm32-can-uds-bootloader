@@ -26,6 +26,7 @@
 #include "app_uds.h"
 #include "app_boot.h"
 #include "params.h"
+#include "app_tasks.h"
 
 /* USER CODE BEGIN Includes */
 
@@ -107,37 +108,13 @@ int main(void)
     bsp_can_init();
     app_uds_init();
 
-    {
-        uint32_t start = HAL_GetTick();
-        uint8_t  confirmed = 0U;
-        uint32_t last_led = 0U;
-        uint32_t last_confirm = 0U;
+    /* 创建 UDS/应用/看门狗任务并启动调度器；不会返回 */
+    app_tasks_start();
 
-        while (1) {
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-            app_uds_poll();
-            HAL_IWDG_Refresh(&hiwdg);
-
-            /* 5 s 后确认启动成功 要放在业务真正跑起来之后
-               APP_SKIP_CONFIRM 可以跳过确认 用来演示回滚 */
-#ifndef APP_SKIP_CONFIRM
-            if ((confirmed == 0U) && ((HAL_GetTick() - start) > BOOT_CONFIRM_DELAY_MS)
-                && ((HAL_GetTick() - last_confirm) > 2000U)) {
-                last_confirm = HAL_GetTick();
-                if (app_confirm_boot() == 0U) {
-                    confirmed = 1U;
-                    bsp_uart_printf("[应用] 启动确认成功\r\n");
-                }
-            }
-#endif
-
-            if ((HAL_GetTick() - last_led) >= 500U) {
-                last_led = HAL_GetTick();
-                HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_1);
-            }
-        }
+    while (1) {
     }
     /* USER CODE END 3 */
 }
@@ -283,9 +260,9 @@ void HAL_CAN_MspInit(CAN_HandleTypeDef *hcan)
     gpio.Alternate = GPIO_AF9_CAN1;
     HAL_GPIO_Init(GPIOB, &gpio);
 
-    HAL_NVIC_SetPriority(CAN1_RX0_IRQn, 1U, 0U);
+    HAL_NVIC_SetPriority(CAN1_RX0_IRQn, 5U, 0U);
     HAL_NVIC_EnableIRQ(CAN1_RX0_IRQn);
-    HAL_NVIC_SetPriority(CAN1_SCE_IRQn, 1U, 0U);
+    HAL_NVIC_SetPriority(CAN1_SCE_IRQn, 5U, 0U);
     HAL_NVIC_EnableIRQ(CAN1_SCE_IRQn);
     /* USER CODE BEGIN CAN1_MspInit 1 */
 

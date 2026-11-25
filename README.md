@@ -1,4 +1,4 @@
-﻿# STM32 CAN 双区 Bootloader 与 UDS OTA 升级
+# STM32 CAN 双区 Bootloader 与 UDS OTA 升级
 
 基于 STM32F407 的 CAN 总线双区 Bootloader：上位机通过 UDS over ISO-TP 把固件写入另一块应用区，支持 A/B 切换、启动 CRC 校验、连续 3 次未确认自动回滚。PC 端与板端各实现一遍协议，附假 ECU，没有硬件也能跑通全流程。
 
@@ -25,10 +25,26 @@ PC 端（Python）                         板端（C）
    ▼                                          └─ bsp_can.c 驱动
   uds.py      报文                        旁挂：flash_if / params / boot
    ▼
-  isotp.py    分帧                          App
-   ▼                                          main（VTOR / 心跳 / 确认）
-  can_driver.py  设备                         └─ app_uds.c  运行期诊断
+  isotp.py    分帧                          App（FreeRTOS）
+   ▼                                          main（VTOR / 外设 / 启动任务）
+  can_driver.py  设备                         ├─ app_tasks.c UDS/应用/看门狗任务
+                                               └─ app_uds.c  运行期诊断
 ```
+
+## App 侧 FreeRTOS
+
+Bootloader 保持裸机（32 KB 预算，启动确定性优先）；**只有 App 使用 FreeRTOS V10.3.1**。
+
+| 任务 | 优先级 | 栈（word） | 职责 |
+|---|---:|---:|---|
+| `uds` | 4 | 512 | `app_uds_poll()`：收 ISO-TP、解析 UDS、响应 |
+| `app` | 3 | 256 | 5 s 启动确认、LED、业务心跳 |
+| `wdg` | 2 | 128 | 检查两个业务任务心跳，正常才喂 IWDG |
+
+CAN 接收改为中断 + 队列：`HAL_CAN_RxFifo0MsgPendingCallback()` 里 `xQueueSendFromISR()`，`bsp_can_recv()` 用 `xQueueReceive()` 阻塞等待，不再忙等 FIFO。
+
+> `App` 的 CAN 中断优先级从 1 改为 5，满足 FreeRTOS `configMAX_SYSCALL_INTERRUPT_PRIORITY`。
+
 
 ## 目录结构
 
@@ -47,7 +63,8 @@ PC 端（Python）                         板端（C）
 │   │   ├── Core/          main / bsp_can / isotp / uds / flash_if / params / boot
 │   │   └── MDK-ARM/       Keil 工程
 │   ├── app/               App 工程（A: 0x08010000 / B: 0x08040000）
-│   │   ├── Core/          main / app_uds / app_boot
+│   │   ├── Core/          main / app_uds / app_boot / app_tasks
+│   │   ├── Middlewares/   FreeRTOS V10.3.1（tasks/queue/list + Cortex-M4F port + heap_4）
 │   │   └── MDK-ARM/       App.uvprojx（A 区）、App_B.uvprojx（B 区）
 │   └── demo.bin           小测试固件（demo 用）
 ├── tests/                 CRC / ISO-TP / 端到端
@@ -89,7 +106,7 @@ python -m unittest discover -s tests -v
 | `firmware/app/MDK-ARM/App.uvprojx` | 0x08010000 | `app.hex` |
 | `firmware/app/MDK-ARM/App_B.uvprojx` | 0x08040000 | `app_b.hex` |
 
-三个工程均 0 error / 0 warning。Bootloader 约 28 KB（预算 32 KB），App 约 21 KB（预算 192 KB）。
+三个工程均 0 error / 0 warning。Bootloader 约 30 KB（预算 32 KB），App 约 26 KB（预算 192 KB）。
 
 ### 4. 接真硬件
 
@@ -128,10 +145,11 @@ python host/cli.py flash --bin firmware/app/MDK-ARM/Objects_B/app_b.bin --addr 0
 
 | 项 | 数据 |
 |---|---|
-| 上位机 + 假 ECU | 15 个测试通过（1.35 s） |
-| Bootloader 编译 | 约 28 KB，0 error 0 warning |
-| App-A / App-B 编译 | 约 21 KB，0 error 0 warning |
-| 上板 OTA | App-A 21216 字节 / 34 块 / 约 2.3 s；App-B 21216 字节 / 34 块 / 约 2.7 s；A/B 连续刷通过 |
+| 上位机 + 假 ECU | 15 个测试通过（约 1.35 s） |
+| Bootloader 编译 | 约 30 KB，0 error 0 warning |
+| App-A / App-B 编译 | 约 26 KB，0 error 0 warning（含 FreeRTOS） |
+| FreeRTOS App 镜像 | 26536 字节 / 42 块（待上板复测 OTA 时间） |
+| 上板 OTA（裸机历史数据） | App-A 21216 字节 / 34 块 / 约 2.3 s；App-B 21216 字节 / 34 块 / 约 2.7 s |
 | 启动确认 | App 启动 5 秒后打印 `[应用] 启动确认成功` |
 
 测量条件与明细见 [docs/verification.md](docs/verification.md)。
@@ -146,6 +164,7 @@ python host/cli.py flash --bin firmware/app/MDK-ARM/Objects_B/app_b.bin --addr 0
 ## 文档
 
 - `docs/verification.md`：验证记录与上板实测数据
+- `docs/freertos.md`：App 侧 FreeRTOS 任务、CAN 队列、中断向量、参数与构建说明
 
 ## License
 

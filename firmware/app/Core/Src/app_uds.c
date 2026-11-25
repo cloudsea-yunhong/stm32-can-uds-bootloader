@@ -7,6 +7,8 @@
 #include "bsp_uart.h"
 #include "bsp_can.h"
 #include "main.h"
+#include "FreeRTOS.h"
+#include "task.h"
 #include <string.h>
 
 #define NRC_SERVICE_NOT_SUPPORTED   0x11U
@@ -109,7 +111,7 @@ static void svc_session(const uint8_t *req, uint16_t len)
         (void)HAL_CAN_Stop(&hcan1);
         (void)HAL_CAN_DeInit(&hcan1);
         __HAL_RCC_CAN1_CLK_DISABLE();
-        HAL_Delay(50U);
+        vTaskDelay(pdMS_TO_TICKS(50U));
         NVIC_SystemReset();
     }
 
@@ -131,7 +133,7 @@ static void svc_reset(const uint8_t *req, uint16_t len)
         return;
     }
     send_positive(0x11U, &body, 1U);
-    HAL_Delay(50U);
+    vTaskDelay(pdMS_TO_TICKS(50U));
     NVIC_SystemReset();
 }
 

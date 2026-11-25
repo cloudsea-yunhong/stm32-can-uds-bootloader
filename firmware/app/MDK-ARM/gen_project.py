@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Generate a minimal Keil MDK5 project file for the bootloader."""
 import os
 
@@ -8,7 +8,12 @@ OUT = os.path.join(ROOT, "MDK-ARM", "App.uvprojx")
 core_files = [
     "main.c", "stm32f4xx_it.c", "system_stm32f4xx.c", "app_uds.c", "app_boot.c",
     "bsp_uart.c", "bsp_can.c", "flash_if.c", "params.c",
-    "isotp.c",
+    "isotp.c", "app_tasks.c",
+]
+freertos_files = [
+    "tasks.c", "queue.c", "list.c",
+    "portable/GCC/ARM_CM4F/port.c",
+    "portable/MemMang/heap_4.c",
 ]
 hal_files = [
     "stm32f4xx_hal.c", "stm32f4xx_hal_cortex.c", "stm32f4xx_hal_rcc.c",
@@ -360,7 +365,7 @@ TEMPLATE = """<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
               <MiscControls>-Wno-unused-parameter</MiscControls>
               <Define>USE_HAL_DRIVER,STM32F407xx</Define>
               <Undefine></Undefine>
-              <IncludePath>..\\Core\\Inc;..\\Drivers\\CMSIS\\Include;..\\Drivers\\CMSIS\\Device\\ST\\STM32F4xx\\Include;..\\Drivers\\STM32F4xx_HAL_Driver\\Inc</IncludePath>
+              <IncludePath>..\\Core\\Inc;..\\Drivers\\CMSIS\\Include;..\\Drivers\\CMSIS\\Device\\ST\\STM32F4xx\\Include;..\\Drivers\\STM32F4xx_HAL_Driver\\Inc;..\\Middlewares\\FreeRTOS\\Source\\include;..\\Middlewares\\FreeRTOS\\Source\\portable\\GCC\\ARM_CM4F</IncludePath>
             </VariousControls>
           </Cads>
           <Aads>
@@ -439,6 +444,11 @@ for f in hal_files:
     hal_group += file_block(f"..\\Drivers\\STM32F4xx_HAL_Driver\\Src\\{f}", f)
 hal_group += "          </Files>\n        </Group>\n"
 
+freertos_group = "        <Group>\n          <GroupName>FreeRTOS</GroupName>\n          <Files>\n"
+for f in freertos_files:
+    freertos_group += file_block(f"..\\Middlewares\\FreeRTOS\\Source\\{f}".replace('/', '\\'), f.split("/")[-1])
+freertos_group += "          </Files>\n        </Group>\n"
+
 CONFIGS = [
     ("App", "app", "IROM(0x08010000,0x30000)", "0x8010000", "0x08010000",
      "<Define>USE_HAL_DRIVER,STM32F407xx</Define>", "Objects", "Listings"),
@@ -460,7 +470,7 @@ for name, outname, cpu_irom, irom_start, text_addr, define, outdir, listdir in C
     xml = xml.replace("<TextAddressRange>0x08010000</TextAddressRange>",
                       "<TextAddressRange>" + text_addr + "</TextAddressRange>")
     xml = xml.replace("<Define>USE_HAL_DRIVER,STM32F407xx</Define>", define)
-    xml = xml.replace("{groups}", core_group + hal_group)
+    xml = xml.replace("{groups}", core_group + hal_group + freertos_group)
     out = os.path.join(ROOT, "MDK-ARM", name + ".uvprojx")
     with open(out, "w", encoding="utf-8", newline="\n") as fp:
         fp.write(xml)
